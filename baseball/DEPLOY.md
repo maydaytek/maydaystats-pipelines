@@ -1,17 +1,17 @@
 # Deploying the baseball Statcast pipeline to GCP
 
-This deploys a Cloud Run **Job** (not a Service — this isn't a web app,
-it's a script that runs to completion once a day) that pulls yesterday's
-Statcast data via pybaseball and appends it to BigQuery, triggered daily
-by Cloud Scheduler.
+This deploys a Cloud Run **Job** (not a Service, since this isn't a web
+app, it's a script that runs to completion once a day) that pulls
+yesterday's Statcast data via pybaseball and appends it to BigQuery,
+triggered daily by Cloud Scheduler.
 
-All commands use `gcloud`. You don't need Docker installed locally —
+All commands use `gcloud`. You don't need Docker installed locally:
 `gcloud builds submit` builds the image in the cloud via Cloud Build.
 
 ## 0. Prerequisites
 
 - A GCP project with billing enabled (required even to stay within the
-  Always Free tier — set a budget alert, see the note at the bottom).
+  Always Free tier; set a budget alert, see the note at the bottom).
 - `gcloud` CLI installed and authenticated (`gcloud auth login`).
 
 ## 1. Set variables and select your project
@@ -93,7 +93,7 @@ gcloud beta run jobs executions logs read --job baseball-statcast-pipeline --reg
 ```
 
 If yesterday was a day with no MLB games (off-days between seasons, etc.)
-you'll see "No rows to load; skipping." — that's expected, not a bug.
+you'll see "No rows to load; skipping." That's expected, not a bug.
 
 To backfill a specific historical range instead of "yesterday", override
 the env vars for a one-off manual run:
@@ -139,11 +139,11 @@ Even "Always Free" usage requires a billing account attached. Set a
 budget alert so you get emailed if anything unexpected spikes:
 
 Console > Billing > Budgets & alerts > Create budget > set to $1.
-This costs nothing itself — it's just a tripwire.
+This costs nothing itself; it's just a tripwire.
 
 ## Why Cloud Run Jobs instead of a Cloud Function
 
-A Cloud Run Job runs to completion and then stops — no idle server, no
+A Cloud Run Job runs to completion and then stops. No idle server, no
 HTTP endpoint to secure, no cold-start web framework needed. It's the
 right primitive for "run this script once a day and exit," which is
 exactly this workload. Cloud Functions/Cloud Run Services are a better
