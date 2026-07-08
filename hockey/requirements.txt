@@ -1,0 +1,6 @@
+nhl-api-py>=3.1.1
+pandas>=2.0
+google-cloud-bigquery>=3.25.0
+db-dtypes>=1.2.0
+pyarrow>=14.0.0
+pandas-gbq>=0.26.1
