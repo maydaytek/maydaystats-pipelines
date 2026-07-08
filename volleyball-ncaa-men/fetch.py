@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import sys
 import time
 from typing import Any
 
@@ -72,12 +73,26 @@ def _get(path: str) -> Any:
 
 
 def _flatten_boxscore(game_id: str, game_date: str, boxscore: dict[str, Any]) -> list[dict[str, Any]]:
-    teams_by_id = {t["teamId"]: t for t in boxscore.get("teams", [])}
+    # Normalize teamId to string on both sides of this join: in production
+    # responses the `teams` array and `teamBoxscore` array don't reliably
+    # agree on int vs string for the same field, which silently breaks a
+    # bare dict lookup (every row falls back to the "not found" default,
+    # producing a null team and a wrong home/away for every single row -
+    # this happened in the first real backfill and wasn't caught by
+    # mocked testing, which had consistently-typed IDs on both sides).
+    teams_by_id = {str(t["teamId"]): t for t in boxscore.get("teams", [])}
     rows: list[dict[str, Any]] = []
 
     for team_box in boxscore.get("teamBoxscore", []):
-        team_id = team_box.get("teamId")
+        team_id = str(team_box.get("teamId"))
         team_info = teams_by_id.get(team_id, {})
+        if not team_info:
+            print(
+                f"WARNING: no matching team for teamId={team_id!r} in game "
+                f"{game_id}; known team ids: {list(teams_by_id.keys())!r}. "
+                "team/home_away will be null/wrong for these rows.",
+                file=sys.stderr,
+            )
         team_abbr = team_info.get("name6Char")
         home_away = "home" if team_info.get("isHome") else "away"
 
