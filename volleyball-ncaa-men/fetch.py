@@ -142,7 +142,21 @@ def fetch_boxscores_for_date(date: str, sport: str, division: str = "d1") -> pd.
         if game_id is None:
             continue
 
-        boxscore = _get(f"/game/{game_id}/boxscore")
+        try:
+            boxscore = _get(f"/game/{game_id}/boxscore")
+        except requests.exceptions.HTTPError as exc:
+            # Some completed games genuinely have no boxscore on file with
+            # the NCAA (e.g. a lopsided non-conference game where stats
+            # were never submitted) - confirmed by checking /game/{id}
+            # directly and seeing "hasBoxscore": false. Skip just this
+            # game rather than failing the whole date/range.
+            print(
+                f"WARNING: skipping game {game_id} on {date}, no boxscore "
+                f"available ({exc})",
+                file=sys.stderr,
+            )
+            continue
+
         all_rows.extend(_flatten_boxscore(game_id, date, boxscore))
 
     return pd.DataFrame(all_rows)

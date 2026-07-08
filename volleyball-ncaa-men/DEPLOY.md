@@ -23,6 +23,15 @@ through the national championship in early May. A daily "yesterday" run
 from June through December will correctly return zero rows every time;
 that's expected, not a bug.
 
+**Known data gap:** about 6% of rows have a blank `player_name` and
+`position`, concentrated in a small number of games at smaller/lower-
+resourced programs. These rows still carry real stat lines (digs, kills,
+etc.), so this looks like an incomplete stat submission on NCAA's own
+side for those specific games rather than a bug in this pipeline - it
+wasn't spread evenly across games, which a parsing bug would produce.
+Worth filtering `WHERE player_name != ''` for player-level analysis if
+this matters for a given query.
+
 ## 1. Set variables (reusing the same project/region as baseball and hockey)
 
 ```bash
