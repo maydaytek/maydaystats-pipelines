@@ -204,11 +204,25 @@ def validate_against_team_total(
     `match: False` means this file didn't parse cleanly and should be
     treated with suspicion rather than loaded silently."""
     team_players = [p for p in players if p["team"] == team_name]
-    total = team_totals.get(team_name, {})
+    total = team_totals.get(team_name)
     checks = {}
     for col in SUMMABLE_COLS:
         summed = sum(p[col] for p in team_players if p[col] is not None)
-        expected = total.get(col)
+        if total is None:
+            # No "Team Total" row was found for this team at all - a real
+            # parse failure, keep expected as None so this still reports
+            # as a mismatch.
+            expected = None
+        else:
+            expected = total.get(col)
+            if expected is None:
+                # "." in the Team Total row means a genuine zero (e.g. a
+                # team with zero aces all match, which is common), not
+                # missing data - _to_num maps "." to None the same way it
+                # does for a truly absent value, so without this the
+                # checksum would flag a perfectly-parsed all-zero column
+                # as a failure just because None != 0.
+                expected = 0.0
         checks[col] = {
             "summed": summed,
             "expected": expected,
@@ -268,6 +282,21 @@ LEGACY_SUMMABLE_COLS = [
 LEGACY_FORMAT_MARKER = "Tot BP W-L"
 LEGACY_TOTAL_ROW_PREFIX = "Players total"
 
+# The Reception column prints as two adjacent values, "Pos%" then "(Exc%)"
+# in parentheses - normally space-separated ("51% (22%)"), but the PDF's
+# text layer sometimes has zero gap between them, gluing into one token
+# ("100%(100%)"). Left unsplit, that row is short exactly one token versus
+# every other row, so _align_stats_legacy's "keep the last 16 tokens"
+# strategy no longer drops that player's leading Vote value like it should -
+# it shifts their ENTIRE stat block one column to the right instead,
+# corrupting serve_total/serve_errors/reception_total/reception_errors (and
+# everything else) for that player, which throws off the whole team's
+# summed checksum even though every other player on the roster parsed
+# correctly. Same family of bug as MERGE_FIX_RE above, just never ported
+# to this layout until it showed up in a real backfill (schedule_event 504,
+# player Landfair Taylor).
+LEGACY_MERGE_FIX_RE = re.compile(r'(\d+%)(\()')
+
 
 def _to_num_legacy(tok: str) -> float | None:
     if tok in (".", "-", ""):
@@ -317,6 +346,7 @@ def parse_box_score_legacy(
             "layout either"
         )
 
+    text = LEGACY_MERGE_FIX_RE.sub(r"\1 \2", text)
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
     players: list[dict] = []
@@ -387,11 +417,18 @@ def validate_against_team_total_legacy(
     players: list[dict], team_totals: dict[str, dict], team_name: str
 ) -> dict[str, dict]:
     team_players = [p for p in players if p["team"] == team_name]
-    total = team_totals.get(team_name, {})
+    total = team_totals.get(team_name)
     checks = {}
     for col in LEGACY_SUMMABLE_COLS:
         summed = sum(p[col] for p in team_players if p[col] is not None)
-        expected = total.get(col)
+        if total is None:
+            expected = None
+        else:
+            expected = total.get(col)
+            if expected is None:
+                # Same "." means real zero, not missing data" fix as the
+                # newer layout's validator - see validate_against_team_total.
+                expected = 0.0
         checks[col] = {
             "summed": summed,
             "expected": expected,
