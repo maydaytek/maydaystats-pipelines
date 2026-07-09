@@ -19,7 +19,6 @@ makes a full backfill and a normal incremental run the same code path.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import subprocess
@@ -30,7 +29,13 @@ from typing import Any
 import pandas as pd
 import requests
 
-from parser import UnsupportedFormatError, box_score_is_valid, parse_box_score
+from parser import (
+    UnsupportedFormatError,
+    box_score_is_valid,
+    box_score_is_valid_legacy,
+    parse_box_score,
+    parse_box_score_legacy,
+)
 
 BASE_URL = "https://provolleyball.com/api"
 REQUEST_TIMEOUT = 30
@@ -181,7 +186,7 @@ def _download_pdf_text(url: str) -> str:
     return _extract_pdf_text(content)
 
 
-def _match_row(event: dict, vsm: dict, checksum_ok: bool) -> dict:
+def _match_row(event: dict, vsm: dict, checksum_ok: bool, source_format: str) -> dict:
     return {
         "schedule_event_id": event["id"],
         "volley_station_match_id": event.get("volley_station_match_id"),
@@ -197,6 +202,7 @@ def _match_row(event: dict, vsm: dict, checksum_ok: bool) -> dict:
         "won_set_home": vsm.get("won_set_home"),
         "won_set_guest": vsm.get("won_set_guest"),
         "checksum_ok": checksum_ok,
+        "source_format": source_format,
     }
 
 
@@ -212,6 +218,7 @@ def _box_row(event: dict, match_id: int | None, player: dict) -> dict:
         "player_name": f"{player['first_name']} {player['last_name']}".strip(),
         "last_name": player["last_name"],
         "first_name": player["first_name"],
+        "source_format": "new",
         "attack_attempts": player["attack_attempts"],
         "kills": player["kills"],
         "attack_errors": player["attack_errors"],
@@ -226,6 +233,59 @@ def _box_row(event: dict, match_id: int | None, player: dict) -> dict:
         "digs": player["digs"],
         "total_blocks": player["total_blocks"],
         "points": player["points"],
+    }
+
+
+def _box_row_legacy(event: dict, match_id: int | None, player: dict) -> dict:
+    """Map the legacy 'Match report' layout's columns onto the same
+    boxscores schema _box_row produces, so both formats live in one
+    table. assists/setting_errors/good_passes/digs are always null here -
+    this older layout never tracked them at all, not a parsing gap.
+    hitting_percentage is computed to match the newer layout's (K-E)/Atts
+    definition, since the legacy layout doesn't print that figure
+    directly (it has Pts%, which is a different thing - kills/attempts,
+    not accounting for errors)."""
+    attack_total = player["attack_total"]
+    attack_errors = player["attack_errors"]
+    kills = player["kills"]
+    hitting_percentage = None
+    if attack_total:
+        errors = attack_errors or 0
+        hitting_percentage = (kills - errors) / attack_total if kills is not None else None
+
+    return {
+        "schedule_event_id": event["id"],
+        "volley_station_match_id": match_id,
+        "game_date": event.get("start_datetime"),
+        "season_id": event.get("season_id"),
+        "team": player["team"],
+        "jersey": player["jersey"],
+        "libero": player["libero"],
+        "player_name": f"{player['first_name']} {player['last_name']}".strip(),
+        "last_name": player["last_name"],
+        "first_name": player["first_name"],
+        "source_format": "legacy",
+        "attack_attempts": attack_total,
+        "kills": kills,
+        "attack_errors": attack_errors,
+        "hitting_percentage": hitting_percentage,
+        "kill_pct": player["kill_pct"],
+        "assists": None,
+        "setting_errors": None,
+        "service_aces": player["service_aces"],
+        "service_errors": player["serve_errors"],
+        "good_passes": None,
+        "reception_errors": player["reception_errors"],
+        "digs": None,
+        "total_blocks": player["total_blocks"],
+        "points": player["points_total"],
+        # legacy-only extras, null on every "new"-format row
+        "points_break_points": player["points_bp"],
+        "points_net_serve_attack": player["points_wl"],
+        "reception_attempts": player["reception_total"],
+        "reception_positive_pct": player["reception_pos_pct"],
+        "reception_excellent_pct": player["reception_exc_pct"],
+        "attack_blocked_by_opponent": player["attack_blocked"],
     }
 
 
@@ -280,16 +340,9 @@ def fetch_new_matches(
 
             try:
                 content = _download_pdf_bytes(vsm["report"])
-                content_hash = hashlib.sha256(content).hexdigest()[:16]
                 text = _extract_pdf_text(content)
                 time.sleep(PDF_DOWNLOAD_PACING_SECONDS)
-                print(
-                    f"DEBUG event {event['id']}: downloaded {len(content)} "
-                    f"bytes (sha256:{content_hash}), extracted "
-                    f"{len(text)} chars",
-                    file=sys.stderr,
-                )
-            except Exception as exc:  # noqa: BLE001 - want to see everything during this debug pass
+            except Exception as exc:  # noqa: BLE001 - one bad file shouldn't kill the run
                 print(
                     f"WARNING: could not download/extract report PDF for "
                     f"schedule_event {event['id']}: {type(exc).__name__}: {exc}",
@@ -297,37 +350,51 @@ def fetch_new_matches(
                 )
                 continue
 
+            # MLV/VolleyStation switched box score PDF templates partway
+            # through the season - try the current "Match Box Score"
+            # layout first, and fall back to the older "Match report"
+            # layout (see parser.py) if that one doesn't recognize this
+            # file at all. Only give up if neither does.
             try:
                 players, totals = parse_box_score(text, t1, t2)
-            except UnsupportedFormatError as exc:
-                print(
-                    f"WARNING: schedule_event {event['id']} ({t1} vs {t2}) "
-                    f"uses a report PDF layout this parser doesn't "
-                    f"recognize, skipping entirely rather than loading "
-                    f"misread data: {exc}",
-                    file=sys.stderr,
-                )
-                continue
+                checksum_ok = box_score_is_valid(players, totals)
+                source_format = "new"
+                row_builder = _box_row
+            except UnsupportedFormatError:
+                try:
+                    players, totals = parse_box_score_legacy(text, t1, t2)
+                    checksum_ok = box_score_is_valid_legacy(players, totals)
+                    source_format = "legacy"
+                    row_builder = _box_row_legacy
+                except UnsupportedFormatError as exc:
+                    print(
+                        f"WARNING: schedule_event {event['id']} ({t1} vs "
+                        f"{t2}) uses a report PDF layout neither parser "
+                        f"recognizes, skipping entirely rather than "
+                        f"loading misread data: {exc}",
+                        file=sys.stderr,
+                    )
+                    continue
+
             if not players:
                 print(
                     f"WARNING: report PDF for schedule_event {event['id']} "
-                    "parsed to zero players, skipping",
+                    f"({source_format} format) parsed to zero players, "
+                    "skipping",
                     file=sys.stderr,
                 )
                 continue
-
-            checksum_ok = box_score_is_valid(players, totals)
             if not checksum_ok:
                 print(
-                    f"WARNING: schedule_event {event['id']} ({t1} vs {t2}) "
-                    "failed the team-total checksum - loading anyway with "
-                    "checksum_ok=False so it can be filtered out or "
-                    "reviewed manually",
+                    f"WARNING: schedule_event {event['id']} ({t1} vs {t2}, "
+                    f"{source_format} format) failed the team-total "
+                    "checksum - loading anyway with checksum_ok=False so "
+                    "it can be filtered out or reviewed manually",
                     file=sys.stderr,
                 )
 
-            match_rows.append(_match_row(event, vsm, checksum_ok))
+            match_rows.append(_match_row(event, vsm, checksum_ok, source_format))
             for p in players:
-                box_rows.append(_box_row(event, match_id, p))
+                box_rows.append(row_builder(event, match_id, p))
 
     return pd.DataFrame(match_rows), pd.DataFrame(box_rows)

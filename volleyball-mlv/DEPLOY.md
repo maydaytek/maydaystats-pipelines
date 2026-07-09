@@ -20,16 +20,38 @@ each workaround exists.
 genuinely the league's own first-party API, not someone else's
 reverse-engineered demo server.
 
-**Data quality flag:** every match row in the `matches` table carries a
-`checksum_ok` boolean. The parser cross-checks its own work by summing
-every parsed player's stats and comparing against the PDF's own printed
-"Team Total" row; `checksum_ok = false` means that comparison failed for
-at least one team in that match, so the boxscore rows for it should be
-treated with more suspicion than the rest (filter `WHERE checksum_ok` for
-anything sensitive). In testing against two real matches (a regular-season
-game and the May 2026 championship semifinal) every column matched
-exactly, so mismatches should be rare, but nothing has flagged this any
-differently.
+**Two PDF layouts:** MLV/VolleyStation switched box score PDF templates
+partway through the 2025-26 season. Roughly the first two-thirds of the
+regular season used an older "Match report" layout with different columns
+and no assist/dig tracking at all; the rest use the newer "Match Box
+Score" layout everything else in this project was originally built
+against. `fetch.py` tries the newer layout first and falls back to the
+older one (`parse_box_score_legacy` in `parser.py`) automatically - every
+row in `boxscores` carries a `source_format` ('new' or 'legacy') so this
+is visible per row rather than silently averaged away. `assists`,
+`setting_errors`, `good_passes`, and `digs` are always null on `legacy`
+rows; that's a real gap in what the older layout tracked, not a parsing
+bug. The legacy layout also contributes a few extra columns with no
+equivalent in the newer one (`points_break_points`,
+`points_net_serve_attack`, `reception_attempts`, `reception_positive_pct`,
+`reception_excellent_pct`, `attack_blocked_by_opponent`) - these are null
+on every `new`-format row.
+
+**Data quality flag:** every match row in the `matches` table also carries
+a `checksum_ok` boolean, independent of which layout it used. Each parser
+cross-checks its own work by summing every parsed player's stats and
+comparing against the PDF's own printed team-total row ("Team Total" in
+the new layout, "Players total" in the legacy one); `checksum_ok = false`
+means that comparison failed for at least one team in that match, so the
+boxscore rows for it should be treated with more suspicion than the rest
+(filter `WHERE checksum_ok` for anything sensitive). In testing against
+three real matches spanning both layouts (a new-layout regular-season
+game, the new-layout May 2026 championship semifinal, and a legacy-layout
+March game), every column matched exactly on all three, so mismatches
+should be rare - but if a PDF layout doesn't match EITHER parser at all,
+`fetch.py` skips that match entirely (logged as a WARNING) rather than
+loading anything for it; if that starts showing up regularly, there may
+be a third layout somewhere in the season worth investigating.
 
 **No "yesterday" date window:** MLV plays 2-4 games a week, not most days,
 so this pipeline doesn't fetch "yesterday's games" the way the NCAA/
