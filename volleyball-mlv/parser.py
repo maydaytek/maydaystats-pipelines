@@ -55,7 +55,14 @@ SUMMABLE_COLS = [
     "service_aces", "digs", "total_blocks", "points",
 ]
 
-MERGE_FIX_RE = re.compile(r'(-?\d\.\d{3})(\d{1,3}%)')
+# Negative efficiency values print without a leading zero ("-.129", not
+# "-0.129"), so the leading digit before the decimal point has to be
+# optional here (\d* not \d) - the original \d version silently failed to
+# match glued tokens like "-.12923%" (Eff -.129 stuck directly to K% 23%
+# with zero gap), which shifted that player's whole column alignment and
+# was the real cause behind most of the checksum failures in the first
+# few backfill attempts, not anything about extraction or the container.
+MERGE_FIX_RE = re.compile(r'(-?\d*\.\d{3})(\d{1,3}%)')
 
 HEADER_LINES = {
     "Set", "1 2 3 4 5", "Attack", "Atts K E Eff K%", "Assist", "Ast BHE",
