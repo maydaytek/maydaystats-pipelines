@@ -4,12 +4,15 @@ Same shape as the baseball pipeline: a Cloud Run Job pulls yesterday's
 NHL boxscores and appends them to BigQuery, triggered daily by Cloud
 Scheduler. Run these from inside the `hockey/` directory.
 
-**Before your first real run**, read the warning at the top of `fetch.py`:
-the field-name mapping in the flatten functions is a best-effort guess at
-the NHL API's undocumented boxscore schema, unverified against a live
-response. Check the first real execution's logs closely - if key stat
-columns come back entirely null, the field names need adjusting to match
-what the live API actually returns.
+**Field-name mapping:** the flatten functions in `fetch.py` started as a
+best-effort guess at the NHL API's undocumented boxscore schema. That
+mapping has since been validated end-to-end: a full 2025-26 season
+(regular season and playoffs) is backfilled in BigQuery, and the
+site's hockey year-in-review post cross-checks its numbers against
+those same columns. If a future season introduces new fields or
+renames existing ones, the same symptom applies - key stat columns
+coming back null in a run's logs is the signal to check `fetch.py`'s
+mapping against the live API response.
 
 ## 1. Set variables (reusing the same project/region as baseball)
 

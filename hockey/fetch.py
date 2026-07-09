@@ -2,15 +2,16 @@
 public api-web.nhle.com endpoints - the same source MoneyPuck and Natural
 Stat Trick build on).
 
-IMPORTANT - unverified against live data: this sandbox's network policy
-blocks outbound requests to api-web.nhle.com, so this fetch/flatten logic
-could only be checked against a hand-built mock boxscore payload, not a
-real one (see the pipeline's DEPLOY.md for the verification note). The
-NHL API is explicitly undocumented and has no official schema guarantee,
-so treat the field names in `_flatten_skaters`/`_flatten_goalies` as a
-best-effort mapping to confirm on your first real `gcloud run jobs
-execute` - if a field comes back null across the board, the key name
-probably needs adjusting to match what the live API actually returns.
+Field-name mapping: the NHL API is explicitly undocumented and has no
+official schema guarantee, so the field names in
+`_flatten_skaters`/`_flatten_goalies` started as a best-effort mapping,
+built and tested in this project's sandbox against a hand-built mock
+payload (outbound requests to api-web.nhle.com are blocked there). That
+mapping has since been validated against a full live 2025-26 season
+backfill (regular season and playoffs) in BigQuery. If the NHL changes
+its schema in a future season, the symptom is the same: a field coming
+back null across the board in a run's logs means the key name needs
+adjusting to match what the live API currently returns.
 """
 from __future__ import annotations
 
