@@ -4,4 +4,11 @@ google-cloud-bigquery>=3.25.0
 db-dtypes>=1.2.0
 pyarrow>=14.0.0
 pandas-gbq>=0.26.1
-pdfplumber>=0.11.0
+# Pinned exactly (not >=): an unpinned pdfplumber let pip resolve a
+# different, older pdfminer.six inside the Docker image's Python 3.11 than
+# it resolved locally under Python 3.14. That older version couldn't parse
+# the FontBBox on the embedded font these box score PDFs use, which broke
+# text extraction (and therefore the parser) on most matches during the
+# first real backfill even though it worked perfectly in local testing.
+pdfplumber==0.11.10
+pdfminer.six==20260107
