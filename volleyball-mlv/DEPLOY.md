@@ -44,14 +44,23 @@ comparing against the PDF's own printed team-total row ("Team Total" in
 the new layout, "Players total" in the legacy one); `checksum_ok = false`
 means that comparison failed for at least one team in that match, so the
 boxscore rows for it should be treated with more suspicion than the rest
-(filter `WHERE checksum_ok` for anything sensitive). In testing against
-three real matches spanning both layouts (a new-layout regular-season
-game, the new-layout May 2026 championship semifinal, and a legacy-layout
-March game), every column matched exactly on all three, so mismatches
-should be rare - but if a PDF layout doesn't match EITHER parser at all,
-`fetch.py` skips that match entirely (logged as a WARNING) rather than
-loading anything for it; if that starts showing up regularly, there may
-be a third layout somewhere in the season worth investigating.
+(filter `WHERE checksum_ok` for anything sensitive). A full backfill of
+the completed 2025-26 season (99 matches) currently comes back with 88
+matches checksum-clean; the legacy layout is 100% clean (12/12), and the
+new layout has 11/87 flagged - every one of those 11 fails on
+`attack_attempts` alone, always a small (1-6) overcount versus the
+printed team total, never any other stat category. Each individual
+player's row in those 11 matches independently cross-validates via
+kills/attack_attempts == kill_pct (unrelated to how we align columns),
+so this looks like a real quirk in VolleyStation's own team-total
+figure rather than a parsing bug - see the comment above `SUMMABLE_COLS`
+in `parser.py` for the full reasoning. If a PDF layout doesn't match
+EITHER parser at all, `fetch.py` skips that match entirely (logged as a
+WARNING) rather than loading anything for it - as of this writing that's
+2 matches (schedule_events 540 and 576), worth a look if that number
+grows. Separately, 14 schedule_events (548-561) have no team name in the
+API at all and get skipped before a PDF is even fetched - looks like a
+data gap on provolleyball's side, not a parser issue.
 
 **No "yesterday" date window:** MLV plays 2-4 games a week, not most days,
 so this pipeline doesn't fetch "yesterday's games" the way the NCAA/

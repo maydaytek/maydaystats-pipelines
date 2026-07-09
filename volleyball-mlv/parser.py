@@ -55,6 +55,21 @@ SUMMABLE_COLS = [
     "service_aces", "digs", "total_blocks", "points",
 ]
 
+# attack_attempts specifically has a known, small, source-data quirk: in
+# roughly 10% of matches, the sum of every player's printed Atts figure
+# comes out 1-6 higher than the PDF's own "Team Total" Atts figure - never
+# the reverse, never any other SUMMABLE_COLS category, and every
+# individual player's row in these matches independently cross-validates
+# via kills/attack_attempts == kill_pct (an orthogonal check unrelated to
+# our column alignment), so this isn't a parsing bug on our end. It looks
+# like VolleyStation's own team-total figure is computed with a slightly
+# different definition of "attempt" than the one used for the per-player
+# figure (e.g. excluding some marginal touch that still gets attributed
+# to a player). checksum_ok still goes false for these matches so they
+# get flagged for manual review rather than silently trusted, but don't
+# be surprised if the root cause turns out to live in the source PDF, not
+# here.
+
 # Negative efficiency values print without a leading zero ("-.129", not
 # "-0.129"), so the leading digit before the decimal point has to be
 # optional here (\d* not \d) - the original \d version silently failed to
@@ -78,6 +93,27 @@ def _to_num(tok: str) -> float | None:
         return float(tok)
     except ValueError:
         return None
+
+
+def _looks_like_name(tok: str) -> bool:
+    """True if tok could plausibly be part of a player's name (real names
+    in this dataset are letters, possibly with hyphens/apostrophes/periods
+    - e.g. "Member-Meneh", "Ka'aha'aina", "L").
+
+    The PDF's "Set Duration Partial Score Score" table sits directly above
+    each team's roster, and pdfplumber's text extraction occasionally
+    interleaves one of its rows ("3 00:28 5-8,13-16,19-21 27-25") into the
+    same text stream as the roster. That line matches the same "digits,
+    then whitespace, then rest" shape a real jersey-number row does, so
+    without this check it gets parsed as a "player" with jersey=3,
+    last_name="00:28", first_name="5-8,13-16,19-21" - a garbage row with
+    every stat blank (harmless to the checksum, since blank stats sum to
+    zero, which is exactly how this slipped through undetected for months
+    of matches) but real pollution in the boxscores table. A genuine
+    player name never contains a digit or a colon; a set/score fragment
+    always does.
+    """
+    return not any(c.isdigit() for c in tok) and ":" not in tok
 
 
 def _align_stats(tokens: list[str]) -> list[str]:
@@ -181,6 +217,9 @@ def parse_box_score(
             continue
 
         last_name, first_name = rest[0], rest[1]
+        if not (_looks_like_name(last_name) and _looks_like_name(first_name)):
+            # Not a real player row - see _looks_like_name's docstring.
+            continue
         stats = _align_stats(rest[2:])
         players.append(
             {
@@ -395,6 +434,13 @@ def parse_box_score_legacy(
             continue
 
         last_name, first_name = rest[0], rest[1]
+        if not (_looks_like_name(last_name) and _looks_like_name(first_name)):
+            # Not a real player row - a stray "Set Duration Partial score
+            # Score" line (e.g. "1 00:23 8-5 16-11 21-18 23-25") matches
+            # the same "digits, then whitespace" jersey-row shape; see
+            # _looks_like_name's docstring in the newer-layout parser
+            # above for the full story.
+            continue
         stats = _align_stats_legacy(rest[2:])
         players.append(
             {
