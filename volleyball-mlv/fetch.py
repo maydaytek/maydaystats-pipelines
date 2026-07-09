@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import time
@@ -35,6 +36,18 @@ BASE_URL = "https://provolleyball.com/api"
 REQUEST_TIMEOUT = 30
 EXTRACT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_extract_pdf_text.py")
 EXTRACT_TIMEOUT = 60
+
+
+_SEED_PREFIX_RE = re.compile(r"^No\.\s*\d+\s+")
+
+
+def _strip_seed(team_name: str | None) -> str | None:
+    """Strip a playoff seed prefix ("No. 1 Indy Ignite" -> "Indy Ignite").
+    The API's schedule-events include seeding for playoff games; the PDF's
+    own team-name header text never does."""
+    if team_name is None:
+        return None
+    return _SEED_PREFIX_RE.sub("", team_name)
 
 
 def _get(path: str, params: dict | None = None) -> Any:
@@ -248,8 +261,15 @@ def fetch_new_matches(
                 continue
             seen_match_ids.add(match_id)
 
-            t1 = event.get("first_team_name")
-            t2 = event.get("second_team_name")
+            # Playoff/championship schedule-events carry a seed prefix in
+            # the API's team name ("No. 1 Indy Ignite") that never appears
+            # in the PDF's own team-name header text (just "Indy Ignite").
+            # Left unstripped, the parser's exact-line-match against the
+            # PDF text never finds either team name, so it never starts
+            # parsing that team's roster at all - a silent zero-players
+            # result that looked like an extraction bug but wasn't.
+            t1 = _strip_seed(event.get("first_team_name"))
+            t2 = _strip_seed(event.get("second_team_name"))
             if not t1 or not t2:
                 print(
                     f"WARNING: schedule_event {event['id']} missing a team "
