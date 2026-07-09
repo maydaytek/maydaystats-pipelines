@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import sys
+import time
 from typing import Any
 
 import pandas as pd
@@ -79,10 +80,56 @@ def list_schedule_events(season_id: int) -> list[dict]:
     return events
 
 
+PDF_DOWNLOAD_RETRIES = 3
+PDF_DOWNLOAD_RETRY_DELAY_SECONDS = 1.0
+PDF_DOWNLOAD_PACING_SECONDS = 0.3
+
+
+def _download_pdf_bytes(url: str) -> bytes:
+    """Download a report PDF, retrying on anything that looks like a
+    truncated/corrupted response.
+
+    Backfilling a full season means ~100+ of these downloads back-to-back
+    with no pacing between them, which turned out to occasionally produce
+    truncated responses from the CDN that `requests` doesn't always flag
+    as an HTTP error (status 200, just fewer bytes than the real file) -
+    that corrupted a real download into a file pdfplumber could open but
+    not extract usable text from, which is what actually caused most of
+    the checksum failures and zero-player parses in the first backfill
+    attempt, not anything about the parser or the container's Python
+    environment (both were cleared by testing this exact file in
+    isolation, which downloaded and parsed perfectly every time). A real
+    PDF always starts with the "%PDF-" magic bytes; anything that doesn't
+    is treated as a bad download and retried rather than handed to
+    pdfplumber and silently mis-parsed.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, PDF_DOWNLOAD_RETRIES + 1):
+        try:
+            resp = requests.get(url, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            content = resp.content
+            if not content.startswith(b"%PDF-"):
+                raise ValueError(
+                    f"response doesn't look like a PDF (got {len(content)} "
+                    f"bytes, starts with {content[:16]!r})"
+                )
+            return content
+        except (requests.exceptions.RequestException, ValueError) as exc:
+            last_exc = exc
+            print(
+                f"WARNING: PDF download attempt {attempt}/{PDF_DOWNLOAD_RETRIES} "
+                f"failed for {url}: {exc}",
+                file=sys.stderr,
+            )
+            time.sleep(PDF_DOWNLOAD_RETRY_DELAY_SECONDS)
+    raise last_exc  # type: ignore[misc]
+
+
 def _download_pdf_text(url: str) -> str:
-    resp = requests.get(url, timeout=REQUEST_TIMEOUT)
-    resp.raise_for_status()
-    with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+    content = _download_pdf_bytes(url)
+    time.sleep(PDF_DOWNLOAD_PACING_SECONDS)  # don't hammer the CDN
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
         return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 
