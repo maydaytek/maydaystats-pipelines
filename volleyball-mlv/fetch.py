@@ -30,7 +30,7 @@ from typing import Any
 import pandas as pd
 import requests
 
-from parser import box_score_is_valid, parse_box_score
+from parser import UnsupportedFormatError, box_score_is_valid, parse_box_score
 
 BASE_URL = "https://provolleyball.com/api"
 REQUEST_TIMEOUT = 30
@@ -297,7 +297,17 @@ def fetch_new_matches(
                 )
                 continue
 
-            players, totals = parse_box_score(text, t1, t2)
+            try:
+                players, totals = parse_box_score(text, t1, t2)
+            except UnsupportedFormatError as exc:
+                print(
+                    f"WARNING: schedule_event {event['id']} ({t1} vs {t2}) "
+                    f"uses a report PDF layout this parser doesn't "
+                    f"recognize, skipping entirely rather than loading "
+                    f"misread data: {exc}",
+                    file=sys.stderr,
+                )
+                continue
             if not players:
                 print(
                     f"WARNING: report PDF for schedule_event {event['id']} "

@@ -83,6 +83,29 @@ def _align_stats(tokens: list[str]) -> list[str]:
     return ["."] * (14 - len(tokens)) + tokens
 
 
+# MLV/VolleyStation used at least two different box score PDF templates
+# across the 2025-26 season: a "Match Box Score" layout (columns Atts K E
+# Eff K% / Ast BHE / Ace E / GP E / # / + / +, "Team Total" row - what
+# every function above this point was built and validated against) and an
+# older "Match report" layout (columns Vote / Tot BP W-L / Tot Err Pts /
+# Tot Err Pos% (Exc%) / Tot Err Blo Pts Pts% / BK Pts, "Players total"
+# row). The two are NOT compatible: feeding the older layout through this
+# parser doesn't fail loudly, it silently produces a full roster of
+# players with completely wrong numbers in every column (things like a
+# player's total_blocks reading 71, or negative attack attempts), because
+# enough of the line shapes coincidentally still match. This exact string
+# only ever appears in the newer layout's header, so its absence is the
+# signal to bail out before parsing anything, rather than trust a
+# checksum to catch column-shuffled garbage after the fact.
+SUPPORTED_FORMAT_MARKER = "Atts K E Eff K%"
+
+
+class UnsupportedFormatError(Exception):
+    """Raised when the PDF text doesn't match the "Match Box Score"
+    layout this parser was built for (e.g. it's the older "Match report"
+    layout MLV used earlier in the 2025-26 season)."""
+
+
 def parse_box_score(
     text: str, team1_name: str, team2_name: str
 ) -> tuple[list[dict], dict[str, dict]]:
@@ -92,7 +115,19 @@ def parse_box_score(
     first_name, and the STAT_COLS fields.
     team_totals: {team_name: {stat_col: value}} parsed from each "Team
     Total" row, for validate_against_team_total.
+
+    Raises UnsupportedFormatError if the text doesn't look like the
+    "Match Box Score" layout at all, rather than silently returning
+    garbage rows built from misread columns.
     """
+    if SUPPORTED_FORMAT_MARKER not in text:
+        raise UnsupportedFormatError(
+            f"text doesn't contain the expected header "
+            f"{SUPPORTED_FORMAT_MARKER!r} - this looks like a different "
+            "report template (e.g. the older 'Match report' layout), not "
+            "the 'Match Box Score' layout this parser handles"
+        )
+
     text = MERGE_FIX_RE.sub(r"\1 \2", text)
     lines = [l.strip() for l in text.split("\n") if l.strip()]
 
