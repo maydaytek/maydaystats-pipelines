@@ -164,7 +164,7 @@ gcloud run jobs add-iam-policy-binding volleyball-mlv-boxscore-pipeline \
 ```bash
 gcloud scheduler jobs create http volleyball-mlv-boxscore-daily \
   --location $REGION \
-  --schedule="45 9 * * *" \
+  --schedule="0 10 * * *" \
   --uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/volleyball-mlv-boxscore-pipeline:run" \
   --http-method POST \
   --oauth-service-account-email scheduler-invoker@$PROJECT_ID.iam.gserviceaccount.com
