@@ -19,6 +19,7 @@ makes a full backfill and a normal incremental run the same code path.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -258,11 +259,20 @@ def fetch_new_matches(
                 continue
 
             try:
-                text = _download_pdf_text(vsm["report"])
-            except requests.exceptions.RequestException as exc:
+                content = _download_pdf_bytes(vsm["report"])
+                content_hash = hashlib.sha256(content).hexdigest()[:16]
+                text = _extract_pdf_text(content)
+                time.sleep(PDF_DOWNLOAD_PACING_SECONDS)
                 print(
-                    f"WARNING: could not download report PDF for "
-                    f"schedule_event {event['id']}: {exc}",
+                    f"DEBUG event {event['id']}: downloaded {len(content)} "
+                    f"bytes (sha256:{content_hash}), extracted "
+                    f"{len(text)} chars",
+                    file=sys.stderr,
+                )
+            except Exception as exc:  # noqa: BLE001 - want to see everything during this debug pass
+                print(
+                    f"WARNING: could not download/extract report PDF for "
+                    f"schedule_event {event['id']}: {type(exc).__name__}: {exc}",
                     file=sys.stderr,
                 )
                 continue
