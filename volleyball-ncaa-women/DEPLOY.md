@@ -118,5 +118,16 @@ gcloud scheduler jobs create http volleyball-ncaa-women-boxscore-daily \
   --oauth-service-account-email scheduler-invoker@$PROJECT_ID.iam.gserviceaccount.com
 ```
 
+Like baseball, this pipeline fetches a rolling window rather than a
+single "yesterday" (`fetch.py`'s `fetch_recent()`, 3 days by default),
+and `bigquery_loader.load_dataframe()` dedups against `game_date`
+already in BigQuery before appending - added after baseball's identical
+single-day pull was found returning 0 rows on real game days because
+its source lagged behind the scheduled run time. This pipeline hasn't
+shown that symptom, but the fix protects against it either way, and
+matters most here since the next women's season starts soonest of any
+sport on this site (late August) - worth having the self-healing
+window in place well before then.
+
 From here it runs itself: zero rows for most of the year, real rows every
 day once the next women's season starts in late August.

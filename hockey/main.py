@@ -13,7 +13,7 @@ import os
 import sys
 
 from bigquery_loader import ensure_dataset, get_client, load_dataframe
-from fetch import fetch_boxscore_range, fetch_yesterday
+from fetch import fetch_boxscore_range, fetch_recent
 
 DATASET_ID = os.environ.get("BQ_DATASET", "nhl_stats")
 TABLE_ID = os.environ.get("BQ_TABLE", "boxscores")
@@ -27,8 +27,8 @@ def main() -> None:
         print(f"Backfilling {start} to {end}")
         df = fetch_boxscore_range(start, end)
     else:
-        print("Fetching yesterday's NHL boxscores")
-        df = fetch_yesterday()
+        print("Fetching recent NHL boxscores (rolling window)")
+        df = fetch_recent()
 
     print(f"Fetched {len(df)} rows")
 

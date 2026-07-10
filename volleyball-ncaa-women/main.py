@@ -18,7 +18,7 @@ import os
 import sys
 
 from bigquery_loader import ensure_dataset, get_client, load_dataframe
-from fetch import fetch_boxscore_range, fetch_yesterday
+from fetch import fetch_boxscore_range, fetch_recent
 
 SPORT = "volleyball-women"
 DATASET_ID = os.environ.get("BQ_DATASET", "ncaa_volleyball_women")
@@ -33,8 +33,8 @@ def main() -> None:
         print(f"Backfilling {SPORT} {start} to {end}")
         df = fetch_boxscore_range(start, end, sport=SPORT)
     else:
-        print(f"Fetching yesterday's {SPORT} boxscores")
-        df = fetch_yesterday(sport=SPORT)
+        print(f"Fetching recent {SPORT} boxscores (rolling window)")
+        df = fetch_recent(sport=SPORT)
 
     print(f"Fetched {len(df)} rows")
 

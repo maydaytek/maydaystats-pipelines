@@ -173,5 +173,16 @@ gcloud scheduler jobs create http volleyball-ncaa-men-boxscore-daily \
 Offset a few minutes from the other pipelines' schedules just so they
 don't all kick off at the same instant - not required, just tidy.
 
+Like baseball, this pipeline fetches a rolling window rather than a
+single "yesterday" (`fetch.py`'s `fetch_recent()`, 3 days by default),
+and `bigquery_loader.load_dataframe()` dedups against `game_date`
+already in BigQuery before appending - added after baseball's identical
+single-day pull was found returning 0 rows on real game days because
+its source lagged behind the scheduled run time. This pipeline hasn't
+shown that symptom, but the fix protects against it either way, and
+also makes the long off-season stretch and any manual re-run safe:
+zero rows correctly stays zero rows, and nothing already loaded gets
+double-loaded.
+
 From here it runs itself: zero rows most of the year, real rows every day
 once the next men's season starts in January.

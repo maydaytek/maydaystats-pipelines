@@ -112,8 +112,22 @@ gcloud scheduler jobs create http hockey-boxscore-daily \
   --oauth-service-account-email scheduler-invoker@$PROJECT_ID.iam.gserviceaccount.com
 ```
 
-Offset a few minutes from the baseball job's `0 9 * * *` schedule (here,
-`15 9 * * *`) just so the two don't kick off at the exact same instant -
-not required, just tidy.
+Offset a few minutes from the other pipelines' schedules just so they
+don't all kick off at the same instant - not required, just tidy.
+(Baseball's own schedule later moved to `0 15 * * *` after its early
+9am UTC run turned out to be too early for its data source - see
+baseball's DEPLOY.md. This job hasn't shown that symptom, but see the
+note below on why it's protected either way.)
+
+Like baseball, this pipeline fetches a rolling window rather than a
+single "yesterday" (`fetch.py`'s `fetch_recent()`, 3 days by default),
+and `bigquery_loader.load_dataframe()` dedups against `game_date`
+already in BigQuery before appending. So even if this job's source
+data is ever slow to publish on a given morning, the next day's run
+picks up whatever was missed automatically instead of that day staying
+empty. It's also what makes off-season runs (NHL's summer break, June
+through September) and manual re-runs both perfectly safe - the window
+just correctly returns zero rows, or dedup skips anything already
+loaded, rather than anything getting double-loaded.
 
 From here it runs itself, same as baseball.

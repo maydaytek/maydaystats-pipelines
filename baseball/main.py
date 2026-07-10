@@ -13,7 +13,7 @@ import os
 import sys
 
 from bigquery_loader import ensure_dataset, get_client, load_dataframe
-from fetch import fetch_statcast_range, fetch_yesterday
+from fetch import fetch_statcast_range, fetch_recent
 
 DATASET_ID = os.environ.get("BQ_DATASET", "mlb_statcast")
 TABLE_ID = os.environ.get("BQ_TABLE", "pitches")
@@ -27,8 +27,8 @@ def main() -> None:
         print(f"Backfilling {start} to {end}")
         df = fetch_statcast_range(start, end)
     else:
-        print("Fetching yesterday's Statcast data")
-        df = fetch_yesterday()
+        print("Fetching recent Statcast data (rolling window)")
+        df = fetch_recent()
 
     print(f"Fetched {len(df)} rows")
 

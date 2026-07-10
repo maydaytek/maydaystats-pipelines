@@ -92,11 +92,14 @@ Watch the logs (Cloud Console > Cloud Run > Jobs > baseball-statcast-pipeline
 gcloud beta run jobs executions logs read --job baseball-statcast-pipeline --region $REGION
 ```
 
-If yesterday was a day with no MLB games (off-days between seasons, etc.)
-you'll see "No rows to load; skipping." That's expected, not a bug.
+If the whole recent window had no MLB games (off-days between seasons,
+etc.) you'll see "No rows to load; skipping." That's expected, not a
+bug. You may also see "Skipping N rows already loaded for dates: [...]"
+on a normal run - that's the dedup check working as intended, since
+`fetch_recent()` deliberately re-fetches the last few days on every run.
 
-To backfill a specific historical range instead of "yesterday", override
-the env vars for a one-off manual run:
+To backfill a specific historical range instead of the rolling window,
+override the env vars for a one-off manual run:
 
 ```bash
 gcloud run jobs execute baseball-statcast-pipeline \
@@ -118,17 +121,40 @@ gcloud run jobs add-iam-policy-binding baseball-statcast-pipeline \
 
 ## 9. Schedule the daily run
 
-Statcast data for a night's games is generally finalized by early the
-next morning, so 9am UTC (adjust to your timezone) is a safe buffer:
+9am UTC turned out not to be a safe buffer: in production this ran into
+Statcast's search export lagging a few hours behind when the previous
+day's games actually finished, so the 9am UTC run sometimes fetched a
+real game day and got back 0 rows. 3pm UTC (adjust to your timezone)
+gives Baseball Savant a full morning to catch up before the pull runs:
 
 ```bash
 gcloud scheduler jobs create http baseball-statcast-daily \
   --location $REGION \
-  --schedule="0 9 * * *" \
+  --schedule="0 15 * * *" \
   --uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/baseball-statcast-pipeline:run" \
   --http-method POST \
   --oauth-service-account-email scheduler-invoker@$PROJECT_ID.iam.gserviceaccount.com
 ```
+
+If you already created this scheduler job with the old `0 9 * * *`
+schedule, update it in place rather than recreating it:
+
+```bash
+gcloud scheduler jobs update http baseball-statcast-daily \
+  --location $REGION \
+  --schedule="0 15 * * *"
+```
+
+The real fix for the underlying issue lives in the pipeline code, not
+just the schedule time: `fetch.py`'s `fetch_recent()` pulls a rolling
+3-day window (not just a single "yesterday") on every run, and
+`bigquery_loader.load_dataframe()` dedups against `game_date` values
+already in the table before appending. So even if a run ever does land
+before that day's data is published, the next day's run picks it up
+automatically instead of that day staying empty forever - see the
+docstrings on both for the full reasoning. This also means it's safe
+to manually re-run the job at any time without worrying about
+duplicating rows.
 
 From here it runs itself. Check BigQuery (`mlb_statcast.pitches`) each
 morning to confirm rows are landing.

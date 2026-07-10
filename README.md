@@ -41,3 +41,13 @@ Everything runs in GCP's Always Free tier (Cloud Run Jobs, Cloud Scheduler,
 BigQuery storage/queries at this data volume) rather than on local
 hardware, so the pipeline doesn't depend on a home connection or a home
 server staying powered on. It just runs, every day, on its own.
+
+## Monitoring
+
+See `MONITORING.md` for the Cloud Monitoring alert policy that emails
+on any job execution failure across all five pipelines. Every
+pipeline's daily fetch also self-heals against a source publishing
+data late: `fetch_recent()` pulls a rolling multi-day window instead of
+a single day, and `bigquery_loader.py` dedups against what's already in
+BigQuery before appending - see any pipeline's `DEPLOY.md` for the
+reasoning behind that pattern.

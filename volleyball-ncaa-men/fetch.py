@@ -179,6 +179,29 @@ def fetch_boxscore_range(start_date: str, end_date: str, sport: str, division: s
 
 
 def fetch_yesterday(sport: str, division: str = "d1") -> pd.DataFrame:
-    """Convenience wrapper for the daily scheduled job: pull yesterday's games."""
+    """Convenience wrapper: pull a single day, yesterday. Kept for manual
+    testing; the scheduled job uses fetch_recent() instead, see below."""
     yesterday = (dt.date.today() - dt.timedelta(days=1)).isoformat()
     return fetch_boxscores_for_date(yesterday, sport, division)
+
+
+def fetch_recent(sport: str, division: str = "d1", lookback_days: int = 3) -> pd.DataFrame:
+    """Self-healing convenience wrapper for the daily scheduled job: pull a
+    rolling window of the last `lookback_days` days (ending yesterday)
+    instead of just yesterday alone.
+
+    Added after the baseball pipeline's identical single-day pull was
+    found returning 0 rows on real game days, because its source data
+    lagged behind the early-morning scheduled run. This proxy may not
+    have the same lag, but the fix is cheap and makes every one of these
+    daily pipelines self-healing against any future lag, rate limiting,
+    or a single missed scheduler run: a day missed on one run gets picked
+    up automatically on the next, instead of staying empty for the rest
+    of the season. During the off-season this still correctly returns
+    zero rows across the whole window - see the module docstring.
+    bigquery_loader.load_dataframe dedups against game_date already in
+    the table, so re-fetching overlapping days here is safe.
+    """
+    end = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+    start = (dt.date.today() - dt.timedelta(days=lookback_days)).isoformat()
+    return fetch_boxscore_range(start, end, sport, division)
