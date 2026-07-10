@@ -1,11 +1,19 @@
 """Load MLB Stats API season snapshots into BigQuery.
 
-Unlike the Statcast pitch-level pipeline, this data isn't an append-only
-event log - a player's season stat line changes every day as they play more
-games. So instead of appending and deduping by date, each daily run replaces
-the table outright (WRITE_TRUNCATE) with the latest full-season snapshot.
-This is "the season as it stands right now," refreshed once a day, not a
-history of every day's numbers.
+Each row is a player's (or team's) cumulative season-to-date stat line as
+of a given day, stamped with snapshot_date. Every daily run appends a new
+snapshot rather than replacing the table, so the table builds up a history
+of how the leaderboards moved over the season - useful for trending things
+like "how did the batting average leaders shift heading into the All-Star
+Game." Re-running the job on the same day is still safe and idempotent:
+before appending, any existing rows for that day's snapshot_date get
+deleted first, so a manual re-run replaces that day's snapshot instead of
+duplicating it.
+
+Downstream queries that only want "the season as it stands right now"
+should filter to the latest snapshot_date (or use the *_latest views, if
+those have been created - see DEPLOY.md) rather than reading the whole
+table.
 """
 from __future__ import annotations
 
@@ -57,15 +65,33 @@ def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_snapshot(
+def _delete_existing_snapshot(client: bigquery.Client, table_ref: str, snapshot_date: str) -> None:
+    """Remove any rows already loaded for this snapshot_date before
+    appending fresh ones. Makes re-running the job on the same day
+    idempotent - it replaces that day's snapshot instead of appending a
+    duplicate copy of it."""
+    query = f"DELETE FROM `{table_ref}` WHERE snapshot_date = @snapshot_date"
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("snapshot_date", "STRING", snapshot_date)]
+    )
+    try:
+        client.query(query, job_config=job_config).result()
+    except Exception as exc:
+        # Most likely the table doesn't exist yet (first-ever load) - treat
+        # as nothing to delete rather than failing the whole run.
+        print(f"Delete-existing-snapshot skipped (table probably doesn't exist yet): {exc}")
+
+
+def append_snapshot(
     client: bigquery.Client,
     df: pd.DataFrame,
     dataset_id: str,
     table_id: str,
     snapshot_date: str,
 ) -> None:
-    """Replace the target table with this DataFrame, stamped with the date
-    of this run so it's clear how fresh the snapshot is."""
+    """Append this DataFrame as today's snapshot, stamped with
+    snapshot_date. Deletes any existing rows for the same snapshot_date
+    first, so this is safe to re-run on the same day."""
     if df.empty:
         print(f"No rows fetched for {table_id}; leaving existing table as-is.")
         return
@@ -74,10 +100,13 @@ def load_snapshot(
     df["snapshot_date"] = snapshot_date
 
     table_ref = f"{client.project}.{dataset_id}.{table_id}"
+    _delete_existing_snapshot(client, table_ref, snapshot_date)
+
     job_config = bigquery.LoadJobConfig(
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
         autodetect=True,
+        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
     )
     job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
     job.result()  # wait for completion, raises on failure
-    print(f"Loaded {len(df)} rows into {table_ref} (snapshot_date={snapshot_date})")
+    print(f"Appended {len(df)} rows into {table_ref} (snapshot_date={snapshot_date})")

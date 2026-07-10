@@ -18,12 +18,18 @@ MLB.com's own stats pages call), so there's no bot wall to run into. It
 was tested directly and returns clean data: real player names, teams,
 positions, and all standard/advanced stat fields.
 
-**This is a snapshot, not an event log.** A player's season stats change
-every day as they play more games, so this job doesn't append - it
-replaces all four tables with the latest full-season numbers on every
-run (`WRITE_TRUNCATE`, see `bigquery_loader.py`). Each row also gets a
-`snapshot_date` column so you can tell how fresh the data is, but there's
-no history of past days kept, unlike the Statcast pipeline.
+**Each row is a snapshot, and the table is a history of them.** A
+player's season stats change every day as they play more games, so each
+row is stamped with a `snapshot_date` and every daily run appends a new
+set of snapshots rather than overwriting the table - the table builds up
+a day-by-day history of where the leaderboards stood, which is what lets
+later queries trend something like "how did the batting average leaders
+move heading into the All-Star Game." Re-running the job on the same day
+is still safe: `bigquery_loader.append_snapshot()` deletes any existing
+rows for that day's `snapshot_date` before appending, so a manual re-run
+replaces that day's snapshot instead of duplicating it. Queries that only
+want "the season as it stands right now" should filter to the latest
+`snapshot_date` in a table (or use the `*_latest` views - see step 8).
 
 Reuses the same GCP project, Artifact Registry repo, and
 `scheduler-invoker` service account already set up for
@@ -94,21 +100,34 @@ gcloud beta run jobs executions logs read <execution-id> --region $REGION
 ```
 
 You should see four "fetched N rows" lines (batting, pitching,
-team_batting, team_pitching) and four "Loaded N rows into ..." lines.
+team_batting, team_pitching) and four "Appended N rows into ..." lines.
 Then check BigQuery: `mlb_season_stats.batting` and
 `mlb_season_stats.pitching` should each have several hundred rows (every
 player with at least one plate appearance or batter faced this season,
 not just qualified regulars - `playerPool=ALL` in `fetch.py`), and
 `team_batting`/`team_pitching` should have 30 rows each, one per team.
 
-If you deployed the earlier FanGraphs-based version of this pipeline
-first, it left behind an empty `mlb_fangraphs` dataset (the 403s failed
-before any table got created) - safe to delete once this one's
-confirmed working:
+### Updating the code on an already-deployed job
+
+If the job already exists (e.g. you already ran steps 1-5 once and are
+now picking up a code change), rebuilding and pushing to the same image
+tag does **not** automatically update the job - Cloud Run Jobs resolve
+the image to a specific digest at deploy time. Force it to pick up the
+new build:
 
 ```bash
-bq rm -r -d $PROJECT_ID:mlb_fangraphs
+gcloud builds submit --tag $IMAGE .
+
+gcloud run jobs update baseball-season-stats-pipeline \
+  --region $REGION \
+  --image $IMAGE
+
+gcloud run jobs execute baseball-season-stats-pipeline --region $REGION
 ```
+
+The very first run under the new append-based code will delete-and-replace
+today's snapshot (from the earlier truncate-based version) rather than
+create a duplicate for today - safe either way.
 
 ## 6. Reuse the existing scheduler-invoker service account
 
@@ -138,10 +157,31 @@ monitoring alert (see `../../../MONITORING.md`) already covers this job
 too - it isn't scoped to specific job names, so a failure here triggers
 the same email alert as any other pipeline.
 
+## 8. Create the *_latest convenience views (optional but recommended)
+
+Since these tables now accumulate a snapshot per day, "who's leading the
+league right now" queries need to filter to the most recent
+`snapshot_date`. These views do that filtering once so downstream
+queries (like a post's BigQuery cell) don't have to repeat it:
+
+```bash
+for table in batting pitching team_batting team_pitching; do
+  bq query --use_legacy_sql=false "
+    CREATE OR REPLACE VIEW \`$PROJECT_ID.mlb_season_stats.${table}_latest\` AS
+    SELECT * FROM \`$PROJECT_ID.mlb_season_stats.${table}\`
+    WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM \`$PROJECT_ID.mlb_season_stats.${table}\`)
+  "
+done
+```
+
+Trend queries (e.g. "how did this player's home run total change over
+the season") should query the base tables directly instead, filtering
+`snapshot_date` to a range rather than a single day.
+
 ## Why a separate pipeline instead of extending `baseball/mlb/statcast/`
 
-Different shape of data (season snapshot vs. pitch-level event log,
-`WRITE_TRUNCATE` vs. append-and-dedup), different source (MLB Stats API
-vs. Baseball Savant), and different failure modes - keeping them as
-separate Cloud Run Jobs means an issue with one can't affect the other's
-daily run.
+Different shape of data (season snapshot history vs. pitch-level event
+log, both append-based but keyed differently - `snapshot_date` here vs.
+`game_date` there), different source (MLB Stats API vs. Baseball
+Savant), and different failure modes - keeping them as separate Cloud
+Run Jobs means an issue with one can't affect the other's daily run.

@@ -21,11 +21,13 @@ and deploy guide, but they all follow the same shape:
       stats via MLB's own Stats API (`statsapi.mlb.com`) - the source for
       stat-ranking style content, since (unlike Statcast) it comes with
       real player names attached and doesn't require reconstructing
-      counting stats from individual pitch events. A daily snapshot
-      rather than an append-only log - see
-      `baseball/mlb/season-stats/DEPLOY.md`. Originally built on
-      pybaseball's FanGraphs wrapper, swapped after FanGraphs added a
-      Cloudflare bot wall that broke it (see that DEPLOY.md for details).
+      counting stats from individual pitch events. Each daily run appends
+      a dated snapshot rather than overwriting, so the table builds up a
+      day-by-day history for trending leaderboards over the season - see
+      `baseball/mlb/season-stats/DEPLOY.md`, including the `*_latest`
+      views for "right now" queries. Originally built on pybaseball's
+      FanGraphs wrapper, swapped after FanGraphs added a Cloudflare bot
+      wall that broke it (see that DEPLOY.md for details).
 - `hockey/`: NHL boxscore data via the NHL API, same pattern as baseball.
   See `hockey/DEPLOY.md`. The field-name mapping in `fetch.py` was
   originally a best-effort guess at the undocumented NHL API schema;
@@ -59,11 +61,9 @@ server staying powered on. It just runs, every day, on its own.
 ## Monitoring
 
 See `MONITORING.md` for the Cloud Monitoring alert policy that emails
-on any job execution failure across all six pipelines. Every
-event-log pipeline's daily fetch also self-heals against a source
-publishing data late: `fetch_recent()` pulls a rolling multi-day window
-instead of a single day, and `bigquery_loader.py` dedups against what's
-already in BigQuery before appending - see any pipeline's `DEPLOY.md`
-for the reasoning behind that pattern. `baseball/mlb/season-stats/` is
-the exception: it's a daily snapshot rather than an event log, so it
-replaces its tables outright on each run instead of appending.
+on any job execution failure across all six pipelines. Every pipeline
+appends rather than overwrites, each keyed on its own natural date
+column (`game_date` for the event-log pipelines, `snapshot_date` for
+`baseball/mlb/season-stats/`), and every pipeline dedups/replaces same-day
+data before appending so a manual re-run is always safe - see any
+pipeline's `DEPLOY.md` for the specifics of its dedup logic.

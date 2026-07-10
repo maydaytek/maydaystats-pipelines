@@ -2,9 +2,12 @@
 
 Fetches four MLB Stats API season leaderboards - batting, pitching, team
 batting, team pitching - for SEASON (defaults to the current year) and
-replaces each of their BigQuery tables with the latest snapshot. Meant to
-run once a day; there's no "yesterday" concept here like the other
-pipelines, since these are cumulative season stats, not per-day events.
+appends each as today's snapshot to its BigQuery table (see
+bigquery_loader.append_snapshot for the append-and-replace-today's-rows
+logic). Meant to run once a day; there's no "yesterday" concept here like
+the other pipelines, since these are cumulative season stats, not per-day
+events - but keeping every day's snapshot (rather than overwriting) lets
+later queries trend a player's or team's numbers across the season.
 """
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ import datetime as dt
 import os
 import sys
 
-from bigquery_loader import ensure_dataset, get_client, load_snapshot
+from bigquery_loader import append_snapshot, ensure_dataset, get_client
 from fetch import fetch_batting, fetch_pitching, fetch_team_batting, fetch_team_pitching
 
 DATASET_ID = os.environ.get("BQ_DATASET", "mlb_season_stats")
@@ -38,7 +41,7 @@ def main() -> None:
         try:
             df = fetch_fn(SEASON)
             print(f"{table_id}: fetched {len(df)} rows")
-            load_snapshot(client, df, DATASET_ID, table_id, snapshot_date)
+            append_snapshot(client, df, DATASET_ID, table_id, snapshot_date)
         except Exception as exc:  # noqa: BLE001 - keep going, report all failures at the end
             print(f"{table_id}: failed - {exc}", file=sys.stderr)
             failures.append(table_id)
