@@ -10,8 +10,22 @@ and deploy guide, but they all follow the same shape:
 
 ## Folders
 
-- `baseball/`: MLB Statcast pitch-level data via `pybaseball`. Start here;
-  see `baseball/DEPLOY.md` for the full GCP setup.
+- `baseball/`: grouped by level, since there's more than one baseball
+  data source and there may be more later (MiLB, college baseball, etc.
+  would each get their own sibling folder here).
+  - `baseball/mlb/`: two separate MLB pipelines.
+    - `baseball/mlb/statcast/`: pitch-level data via `pybaseball`'s
+      Statcast wrapper. Start here; see `baseball/mlb/statcast/DEPLOY.md`
+      for the full GCP setup.
+    - `baseball/mlb/season-stats/`: season batting, pitching, and team
+      stats via MLB's own Stats API (`statsapi.mlb.com`) - the source for
+      stat-ranking style content, since (unlike Statcast) it comes with
+      real player names attached and doesn't require reconstructing
+      counting stats from individual pitch events. A daily snapshot
+      rather than an append-only log - see
+      `baseball/mlb/season-stats/DEPLOY.md`. Originally built on
+      pybaseball's FanGraphs wrapper, swapped after FanGraphs added a
+      Cloudflare bot wall that broke it (see that DEPLOY.md for details).
 - `hockey/`: NHL boxscore data via the NHL API, same pattern as baseball.
   See `hockey/DEPLOY.md`. The field-name mapping in `fetch.py` was
   originally a best-effort guess at the undocumented NHL API schema;
@@ -45,9 +59,11 @@ server staying powered on. It just runs, every day, on its own.
 ## Monitoring
 
 See `MONITORING.md` for the Cloud Monitoring alert policy that emails
-on any job execution failure across all five pipelines. Every
-pipeline's daily fetch also self-heals against a source publishing
-data late: `fetch_recent()` pulls a rolling multi-day window instead of
-a single day, and `bigquery_loader.py` dedups against what's already in
-BigQuery before appending - see any pipeline's `DEPLOY.md` for the
-reasoning behind that pattern.
+on any job execution failure across all six pipelines. Every
+event-log pipeline's daily fetch also self-heals against a source
+publishing data late: `fetch_recent()` pulls a rolling multi-day window
+instead of a single day, and `bigquery_loader.py` dedups against what's
+already in BigQuery before appending - see any pipeline's `DEPLOY.md`
+for the reasoning behind that pattern. `baseball/mlb/season-stats/` is
+the exception: it's a daily snapshot rather than an event log, so it
+replaces its tables outright on each run instead of appending.

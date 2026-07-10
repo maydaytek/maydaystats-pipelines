@@ -46,7 +46,8 @@ gcloud artifacts repositories create $REPO \
 
 ## 4. Build and push the image
 
-Run this from inside the `baseball/` directory (where the Dockerfile lives):
+Run this from inside the `baseball/mlb/statcast/` directory (where the
+Dockerfile lives):
 
 ```bash
 gcloud builds submit --tag $IMAGE .
@@ -106,6 +107,79 @@ gcloud run jobs execute baseball-statcast-pipeline \
   --region $REGION \
   --update-env-vars START_DATE=2025-04-01,END_DATE=2025-04-07
 ```
+
+## 7b. Backfilling the full 2026 season
+
+Only July 7-9 was ever actually loaded (see the "First Pitches" post's
+history - that job was a pipeline validation, not a season backfill).
+2026 Opening Day was March 25, so there are roughly three and a half
+months of pitch-level data missing. Statcast is pitch-by-pitch, so this
+is a lot more data per day than the boxscore-style pipelines - bump both
+the timeout and the memory first (a full month in memory as one
+DataFrame OOM'd at Cloud Run's default 512Mi), and run it in two-week
+chunks rather than monthly:
+
+```bash
+gcloud run jobs update baseball-statcast-pipeline \
+  --region $REGION \
+  --task-timeout 3600 \
+  --memory 2Gi
+
+gcloud run jobs execute baseball-statcast-pipeline \
+  --region $REGION \
+  --update-env-vars START_DATE=2026-03-25,END_DATE=2026-03-31
+
+gcloud run jobs execute baseball-statcast-pipeline \
+  --region $REGION \
+  --update-env-vars START_DATE=2026-04-01,END_DATE=2026-04-15
+
+gcloud run jobs execute baseball-statcast-pipeline \
+  --region $REGION \
+  --update-env-vars START_DATE=2026-04-16,END_DATE=2026-04-30
+
+gcloud run jobs execute baseball-statcast-pipeline \
+  --region $REGION \
+  --update-env-vars START_DATE=2026-05-01,END_DATE=2026-05-15
+
+gcloud run jobs execute baseball-statcast-pipeline \
+  --region $REGION \
+  --update-env-vars START_DATE=2026-05-16,END_DATE=2026-05-31
+
+gcloud run jobs execute baseball-statcast-pipeline \
+  --region $REGION \
+  --update-env-vars START_DATE=2026-06-01,END_DATE=2026-06-15
+
+gcloud run jobs execute baseball-statcast-pipeline \
+  --region $REGION \
+  --update-env-vars START_DATE=2026-06-16,END_DATE=2026-06-30
+
+gcloud run jobs execute baseball-statcast-pipeline \
+  --region $REGION \
+  --update-env-vars START_DATE=2026-07-01,END_DATE=2026-07-06
+```
+
+If a chunk still OOMs at 2Gi, split it again into one-week pieces
+rather than raising memory further - Statcast's row-per-pitch density
+varies with games-per-day, and smaller chunks are cheaper to retry than
+a bigger memory tier.
+
+Check each execution's logs before moving to the next chunk:
+
+```bash
+gcloud beta run jobs executions logs read <execution-id> --region $REGION
+```
+
+`bigquery_loader.py`'s dedup means it's safe to re-run any chunk, or run
+them out of order, or overlap with the July 7-9 data already loaded -
+anything already in the table for a given `game_date` gets skipped
+rather than duplicated.
+
+The `--task-timeout 3600` and `--memory 2Gi` changes persist on the job
+going forward (unlike `--update-env-vars`, which is a one-time
+override) - no need to set either back down afterward, since a larger
+allowance only matters if a run actually needs it. The daily scheduled
+run (a 3-day rolling window, not a multi-week chunk) fits comfortably
+inside both, so this doesn't change normal day-to-day cost.
 
 ## 8. Create a dedicated service account for Cloud Scheduler to invoke the job
 

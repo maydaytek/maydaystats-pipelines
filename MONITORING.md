@@ -1,7 +1,8 @@
 # Alerting on pipeline job failures
 
 One Cloud Monitoring alert policy, covering every pipeline's Cloud Run
-Job (baseball, hockey, both NCAA volleyball jobs, and MLV) at once: if
+Job (baseball statcast, baseball season-stats, hockey, both NCAA
+volleyball jobs, and MLV) at once: if
 any execution fails - a crash, an unhandled exception, a schema error
 like the `arm_angle` truncation this session hit - you get an email
 within a few minutes, instead of finding out only by manually checking
@@ -84,7 +85,7 @@ EOF
 gcloud beta monitoring policies create --policy-from-file=/tmp/pipeline-failure-policy.json
 ```
 
-One policy, all five jobs - the filter isn't scoped to a specific job
+One policy, all six jobs - the filter isn't scoped to a specific job
 name, so it matches a failure on any of them, and `groupByFields` on
 `job_name` means the alert email tells you which pipeline broke rather
 than just "something failed somewhere."
@@ -103,5 +104,5 @@ if it had existed at the time.
 
 Free. Cloud Monitoring's alerting policies and email notification
 channels don't have a paid tier for volume this low - this project's
-entire monitoring footprint (five jobs, checked every few minutes)
+entire monitoring footprint (six jobs, checked every few minutes)
 stays well inside Cloud Monitoring's free allowance.
