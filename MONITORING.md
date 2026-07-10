@@ -26,7 +26,7 @@ env var rather than hardcoded here since this repo is public:
 ```bash
 export ALERT_EMAIL=<your-email-address>
 
-gcloud monitoring channels create \
+gcloud beta monitoring channels create \
   --display-name="Pipeline failure alerts" \
   --type=email \
   --channel-labels=email_address=$ALERT_EMAIL
@@ -35,7 +35,7 @@ gcloud monitoring channels create \
 Grab its resource name:
 
 ```bash
-export CHANNEL_ID=$(gcloud monitoring channels list \
+export CHANNEL_ID=$(gcloud beta monitoring channels list \
   --filter='displayName="Pipeline failure alerts"' \
   --format='value(name)')
 
@@ -81,7 +81,7 @@ cat > /tmp/pipeline-failure-policy.json <<EOF
 }
 EOF
 
-gcloud monitoring policies create --policy-from-file=/tmp/pipeline-failure-policy.json
+gcloud beta monitoring policies create --policy-from-file=/tmp/pipeline-failure-policy.json
 ```
 
 One policy, all five jobs - the filter isn't scoped to a specific job
@@ -92,7 +92,7 @@ than just "something failed somewhere."
 ## 3. Verify it's live
 
 ```bash
-gcloud monitoring policies list --filter='displayName="maydaystats pipeline job execution failed"'
+gcloud beta monitoring policies list --filter='displayName="maydaystats pipeline job execution failed"'
 ```
 
 Should show the policy as `ENABLED`. No need to test-fire it manually -
